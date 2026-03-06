@@ -1,0 +1,50 @@
+# Kvartil Matplotlib style (validated, single-line cycler)
+
+figure.figsize: 15,6
+
+figure.facecolor : "#FAFAFA"
+axes.facecolor   : "#FAFAFA"
+
+# Color cycle — must be ONE LINE in .mplstyle
+axes.prop_cycle : cycler('color', ["#214BB7","#91B8FF","#E0E5EC","#DC93B0","#00003B","#646464","#E83F6F"])
+
+# Typography
+font.family      : sans-serif
+font.sans-serif  : Roboto, Arial, DejaVu Sans, Liberation Sans
+font.size        : 12.0
+axes.titlesize   : 16.0
+axes.titleweight : normal
+axes.titlecolor  : "#00003B"
+axes.labelsize   : 12.0
+axes.labelcolor  : "#00003B"
+
+# Grid & spines
+axes.grid        : True
+axes.grid.axis   : y
+grid.color       : "#E0E5EC"
+grid.linestyle   : -
+grid.linewidth   : 0.8
+axes.edgecolor   : "#E0E5EC"
+axes.linewidth   : 0.8
+
+# Ticks
+xtick.color      : "#646464"
+ytick.color      : "#646464"
+xtick.labelsize  : 11.0
+ytick.labelsize  : 11.0
+xtick.direction  : out
+ytick.direction  : out
+
+# Lines & markers
+lines.linewidth  : 1.0
+lines.markersize : 2.0
+
+# Legend
+legend.frameon   : False
+legend.fontsize  : 11.0
+legend.title_fontsize : 12.0
+
+# Saving
+savefig.facecolor: "#FAFAFA"
+savefig.edgecolor: "#FAFAFA"
+savefig.dpi      : 144
