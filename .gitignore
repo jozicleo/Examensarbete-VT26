@@ -1,0 +1,6 @@
+# Stora resultatfiler – regenereras via simulering
+analysresultat/result_2.pkl
+analysresultat/result_mc_v2.pkl
+
+# Claude Code intern mapp
+.claude/
