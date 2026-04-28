@@ -1,5 +1,7 @@
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
+import os
 from scipy.optimize import minimize
 
 # =========================================================
@@ -22,11 +24,11 @@ KEEP_RATE = 0.30
 RISK_PARITY_LOOKBACK = 36
 RISK_PARITY_MIN_OBS = 24
 
-N_SIMULATIONS = 1   # börja lågt, höj senare
+N_SIMULATIONS = 300  # börja lågt, höj senare
 RANDOM_SEED = 42
 
 INITIAL_WEALTH = 1.0
-OUTPUT_FILE = "MC_portfolio_results_wealth_based.xlsx"
+OUTPUT_FILE = "MC_portfolio_results_wealth_based_2.xlsx"
 
 
 # =========================================================
@@ -125,6 +127,22 @@ def risk_contributions(weights, cov_matrix):
     marginal = cov_matrix @ w
     return w * marginal / port_vol
 
+###################
+def filter_universe_by_return_history(universe, returns_df, rebalance_date, lookback_months, min_obs):
+    start_date = rebalance_date - pd.DateOffset(months=lookback_months)
+
+    window = returns_df.loc[
+        (returns_df.index < rebalance_date) &
+        (returns_df.index >= start_date),
+        universe
+    ]
+
+    valid_counts = window.notna().sum()
+
+    valid_universe = valid_counts[valid_counts >= min_obs].index.tolist()
+
+    return valid_universe
+####################
 
 def risk_parity_weights(cov_matrix, tickers):
     n = len(tickers)
@@ -268,6 +286,8 @@ def evolve_portfolio_one_year(positions, returns_df, start_date, end_date):
     # för tydligare statistik
     bankrupt_status = {ticker: False for ticker in tickers}
     acquired_status = {ticker: False for ticker in tickers}
+    
+
 
     for dt, row in period_returns.iterrows():
         beginning_positions = positions.copy()
@@ -275,7 +295,7 @@ def evolve_portfolio_one_year(positions, returns_df, start_date, end_date):
 
         bankrupt_this_month = 0
         acquired_this_month = 0
-
+        
         for ticker in tickers:
             r = row[ticker]
 
@@ -343,10 +363,7 @@ def build_one_simulation(mc_df, returns_df, simulation_id, rng):
     monthly_records = []
     annual_rebalance_records = []
 
-    # Gemensamma urval per (cap, storlek)
     current_constituents_base = {}
-
-    # Varje faktisk portfölj får eget wealth path
     current_positions = {}
 
     for t in range(len(rebalance_dates) - 1):
@@ -360,32 +377,45 @@ def build_one_simulation(mc_df, returns_df, simulation_id, rng):
             universe = segments[cap]
 
             for size in PORTFOLIO_SIZES:
-                base_key = (cap, size)
-
-                if t == 0:
-                    selected = initial_random_selection(universe, size, rng)
-                else:
-                    previous_selected = current_constituents_base.get(base_key, None)
-                    if previous_selected is None:
-                        selected = initial_random_selection(universe, size, rng)
-                    else:
-                        selected = rebalance_selection(
-                            old_tickers=previous_selected,
-                            universe=universe,
-                            size=size,
-                            rng=rng,
-                            keep_rate=KEEP_RATE
-                        )
-
-                if selected is None:
-                    continue
-
-                current_constituents_base[base_key] = selected.copy()
 
                 for weighting in WEIGHTING_METHODS:
+
+                    if weighting == "risk_parity":
+                        selection_universe = filter_universe_by_return_history(
+                            universe=universe,
+                            returns_df=returns_df,
+                            rebalance_date=reb_date,
+                            lookback_months=RISK_PARITY_LOOKBACK,
+                            min_obs=RISK_PARITY_MIN_OBS
+                        )
+                    else:
+                        selection_universe = universe
+
+                    base_key = (cap, size, weighting)
+
+                    if t == 0:
+                        selected = initial_random_selection(selection_universe, size, rng)
+                    else:
+                        previous_selected = current_constituents_base.get(base_key, None)
+
+                        if previous_selected is None:
+                            selected = initial_random_selection(selection_universe, size, rng)
+                        else:
+                            selected = rebalance_selection(
+                                old_tickers=previous_selected,
+                                universe=selection_universe,
+                                size=size,
+                                rng=rng,
+                                keep_rate=KEEP_RATE
+                            )
+
+                    if selected is None:
+                        continue
+
+                    current_constituents_base[base_key] = selected.copy()
+
                     portfolio_group = f"sim{simulation_id}_{cap}_{size}_{weighting}"
 
-                    # wealth in i årets rebalansering
                     if t == 0:
                         portfolio_wealth = INITIAL_WEALTH
                     else:
@@ -404,7 +434,6 @@ def build_one_simulation(mc_df, returns_df, simulation_id, rng):
                     if weights is None:
                         continue
 
-                    # Fördela HELA aktuella wealth på årets nya innehav
                     positions = weights * portfolio_wealth
 
                     annual_rebalance_records.append({
@@ -418,18 +447,19 @@ def build_one_simulation(mc_df, returns_df, simulation_id, rng):
                         "n_constituents": len(weights)
                     })
 
-                    for ticker in weights.index:
-                        constituents_records.append({
-                            "simulation": simulation_id,
-                            "portfolio_group": portfolio_group,
-                            "rebalance_date": reb_date,
-                            "cap_segment": cap,
-                            "portfolio_size": size,
-                            "weighting": weighting,
-                            "ticker": ticker,
-                            "weight_at_rebalance": float(weights.loc[ticker]),
-                            "capital_allocated_at_rebalance": float(positions.loc[ticker])
-                        })
+                    # for ticker in weights.index:
+                    #     constituents_records.append({
+                    #         "simulation": simulation_id,
+                    #         "portfolio_group": portfolio_group,
+                    #         "rebalance_date": reb_date,
+                    #         "cap_segment": cap,
+                    #         "portfolio_size": size,
+                    #         "weighting": weighting,
+                    #         "ticker": ticker,
+                    #         "weight_at_rebalance": float(weights.loc[ticker]),
+                    #         "capital_allocated_at_rebalance": float(positions.loc[ticker])
+                    #     })
+                    constituents_df = pd.DataFrame()
 
                     evolved_positions, records = evolve_portfolio_one_year(
                         positions=positions,
@@ -511,9 +541,50 @@ def create_summary(monthly_df):
 
     return summary
 
-
 # =========================================================
-# 10. MAIN
+# 10. PLOTS
+# =========================================================
+
+def plot_final_wealth_histograms(summary_df, output_folder="FinalWealthHistograms"):
+    os.makedirs(output_folder, exist_ok=True)
+
+    grouped = summary_df.groupby(["cap_segment", "portfolio_size", "weighting"])
+
+    for (cap, size, weighting), df in grouped:
+        final_wealth = df["final_wealth"].dropna()
+
+        if len(final_wealth) == 0:
+            continue
+
+        plt.figure(figsize=(8, 5))
+        plt.hist(final_wealth, bins=30, edgecolor="black")
+
+        plt.title(
+            f"Final Wealth Distribution\n"
+            f"{cap.capitalize()} cap | {size} stocks | {weighting}"
+        )
+        plt.xlabel("Final wealth")
+        plt.ylabel("Number of simulations")
+
+        mean_val = final_wealth.mean()
+        median_val = final_wealth.median()
+
+        plt.axvline(mean_val, linestyle="--", linewidth=2, label=f"Mean: {mean_val:.2f}")
+        plt.axvline(median_val, linestyle=":", linewidth=2, label=f"Median: {median_val:.2f}")
+
+        plt.legend()
+        plt.tight_layout()
+
+        filename = f"hist_final_wealth_{cap}_{size}_{weighting}.png"
+        filepath = os.path.join(output_folder, filename)
+
+        plt.savefig(filepath, dpi=300)
+        plt.close()
+
+    print(f"Histogram sparade i mappen: {output_folder}")
+    
+# =========================================================
+# 11. MAIN
 # =========================================================
 
 if __name__ == "__main__":
@@ -532,16 +603,42 @@ if __name__ == "__main__":
         seed=RANDOM_SEED
     )
 
-    summary_df = create_summary(monthly_df)
+    # t0 = time.time()
+
+    # constituents_df, monthly_df, annual_df = run_monte_carlo(...)
+    # print(f"Simuleringstid: {time.time() - t0:.1f} sekunder")
+
+    # t1 = time.time()
+    # summary_df = create_summary(monthly_df)
+    # print(f"Summarytid: {time.time() - t1:.1f} sekunder")
+
+    # t2 = time.time()
+    # plot_final_wealth_histograms(summary_df)
+    # print(f"Plottid: {time.time() - t2:.1f} sekunder")
     
+    summary_df = create_summary(monthly_df)
+
+    plot_final_wealth_histograms(summary_df)
     monthly_df = monthly_df.sort_values(
     ["simulation", "cap_segment", "portfolio_size", "weighting", "date"]
     ).reset_index(drop=True)
 
     with pd.ExcelWriter(OUTPUT_FILE, engine="openpyxl") as writer:
-        constituents_df.to_excel(writer, sheet_name="Constituents", index=False)
-        monthly_df.to_excel(writer, sheet_name="MonthlyWealthPath", index=False)
+        #constituents_df.to_excel(writer, sheet_name="Constituents", index=False)
+        #monthly_df.to_excel(writer, sheet_name="MonthlyWealthPath", index=False)
         annual_df.to_excel(writer, sheet_name="AnnualRebalances", index=False)
         summary_df.to_excel(writer, sheet_name="Summary", index=False)
+    # annual_df.to_csv("annual_rebalances.csv", index=False)
+    # summary_df.to_csv("summary.csv", index=False)
+    # monthly_df.to_csv("monthly_wealth_path.csv", index=False)
 
     print(f"Allt klart. Resultat sparade i {OUTPUT_FILE}")
+
+
+
+
+
+
+
+
+
